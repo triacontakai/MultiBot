@@ -14,9 +14,7 @@ async def main():
     async with IrcHandler(host, port) as client:
         while True:
             await client.login(username, password)
-            print('receiving message')
             msg = await client.recv_msg()
-            print('received message')
             print(msg)
 
 asyncio.run(main())

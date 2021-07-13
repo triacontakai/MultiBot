@@ -39,8 +39,28 @@ class IrcHandler:
     # this is where the majority of time will be spent
     # returns a message object
     async def recv_msg(self) -> bytes:
-        response = await self.reader.readline()
-        return Message(response)
+        # we return from this loop as soon as we get a proper message
+        while True:
+            response = await self.reader.readline()
+            response = response.strip(b'\r\n')
+            if response[0] == ord(':'):
+                return Message(response)
+
+            # if we get a direct IRC command, handle it here
+            command, _, argument = response.partition(b' ')
+            if response.startswith(b'PING'):
+                reply = b'PONG ' + argument + b'\r\n'
+                self.writer.write(reply)
+                await self.writer.drain()
+                print(response)
+                print(reply)
+            else:
+                raise UnsupportedCommandError("Invalid command: {command.decode('ascii')}")
+
+    # sends a message to a client using PRIVMSG
+    # works for both channels (prefixed with #) and users
+    #async def send_msg(self, who, message):
+    #    command = 
 
 @dataclass
 class Message:
@@ -51,14 +71,17 @@ class Message:
     data: str = field(init=False)
 
     def __post_init__(self, response: str):
-        # all responses should start with :
+        # all responses passed here should start with :
         assert response[0] == ord(':')
 
         response = response[1:]
         blocks = response.split(b':')
-        self.data = blocks[1].decode('ascii').strip('\r\n')
+        self.data = blocks[1].decode('ascii')
 
         blocks = blocks[0].split(b' ')
         self.sender = blocks[0].decode('ascii')
         self.command = blocks[1].decode('ascii')
         self.params = [blocks[i].decode('ascii') for i in range(2, len(blocks))]
+
+class UnsupportedCommandError(Exception):
+    pass
