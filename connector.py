@@ -5,12 +5,12 @@ from dataclasses import dataclass, InitVar, field
 # abstracts irc messages into a more easily dealt with form
 # also filters out certain types of messages we don't care about (e.g. QUIT)
 class IrcHandler:
-    username: str
-    password: str
+    host: str
+    port: int
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
 
-    def __init__(self, host, port):
+    def __init__(self, host: str, port: int):
         self.host = host
         self.port = port
 
@@ -19,6 +19,10 @@ class IrcHandler:
         return self
 
     async def __aexit__(self, *a):
+        await self.shutdown()
+
+    async def shutdown(self):
+        self.writer.write(b'QUIT\r\n')
         self.writer.close()
         await self.writer.wait_closed()
 
@@ -30,9 +34,9 @@ class IrcHandler:
         if self.reader is None and self.writer is None:
             self.connect()
 
-        commands = f'PASS {password}'.encode('ascii') + b'\r\n'
-        commands += f'USER {username}'.encode('ascii') + b'\r\n'
-        commands += f'NICK {username}'.encode('ascii') + b'\r\n'
+        commands = f'PASS {password}\r\n'.encode('ascii')
+        commands += f'USER {username}\r\n'.encode('ascii')
+        commands += f'NICK {username}\r\n'.encode('ascii')
         self.writer.write(commands)
         await self.writer.drain()
 
@@ -48,7 +52,7 @@ class IrcHandler:
 
             # if we get a direct IRC command, handle it here
             command, _, argument = response.partition(b' ')
-            if response.startswith(b'PING'):
+            if command == b'PING':
                 reply = b'PONG ' + argument + b'\r\n'
                 self.writer.write(reply)
                 await self.writer.drain()
@@ -57,10 +61,12 @@ class IrcHandler:
             else:
                 raise UnsupportedCommandError("Invalid command: {command.decode('ascii')}")
 
-    # sends a message to a client using PRIVMSG
+    # sends a private message to a client using PRIVMSG
     # works for both channels (prefixed with #) and users
-    #async def send_msg(self, who, message):
-    #    command = 
+    async def privmsg(self, who: str, message: str):
+        command = f'PRIVMSG {who} :{message}\r\n'.encode('ascii')
+        self.writer.write(command)
+        await self.writer.drain()
 
 @dataclass
 class Message:
@@ -78,7 +84,7 @@ class Message:
         blocks = response.split(b':')
         self.data = blocks[1].decode('ascii')
 
-        blocks = blocks[0].split(b' ')
+        blocks = blocks[0].split()
         self.sender = blocks[0].decode('ascii')
         self.command = blocks[1].decode('ascii')
         self.params = [blocks[i].decode('ascii') for i in range(2, len(blocks))]
