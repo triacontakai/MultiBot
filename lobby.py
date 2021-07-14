@@ -1,3 +1,4 @@
+import re
 import asyncio
 import typing
 from connector import IrcHandler
@@ -15,6 +16,7 @@ class LobbyManager:
         self.client = client
         self.username = username
         self.lobbyname = lobbyname
+        self.host_queue = list()
 
     async def __aenter__(self):
         await self.start()
@@ -46,20 +48,48 @@ class LobbyManager:
     async def process_msg(self):
         msg = await self.client.recv_msg()
 
-        # any other commands are likely irc filler
         if msg.command != 'PRIVMSG':
             return
 
-        # only handle messages in DMs or lobby
         msg_channel = msg.params[0]
         if msg_channel != self.channel and msg_channel != self.username:
             return
 
         # bancho messages will result in lobby state changes, handle this in internal function
-        #if msg.sender == f'{bancho}{suffix}' and msg_channel == self.channel:
-        #    self._handle_bancho(msg)
+        if msg.sender == f'{bancho}{suffix}' and msg_channel == self.channel:
+            await self._handle_bancho(msg)
 
         # check player messages for attempt to relay !mp commands
         # TODO: only relay from current host and specified operators
-        if msg.data.startswith('!mp'):
+        if msg.data.startswith('!mp') and msg.sender != self.username:
             await self.client.privmsg(self.channel, msg.data)
+
+    async def _handle_bancho(self, msg):
+        # player joining
+        if match := re.match(r"(.+) joined in slot \d+.", msg.data):
+            name = match.group(1)
+            if len(self.host_queue) < 1:
+                await self.client.privmsg(self.channel, f'!mp host {name}')
+
+            # we don't want the current host to go twice in a row if there's just one
+            if len(self.host_queue) == 1:
+                self.host_queue.insert(0, name)
+            else:
+                self.host_queue.append(name)
+            print(f"Player joined! Current host queue: {self.host_queue}")
+
+        # player leaving
+        elif match := re.match(r"(.+) left the game.", msg.data):
+            name = match.group(1)
+            self.host_queue.remove(name)
+            print(f"Player left! Current host queue: {self.host_queue}")
+
+        # match ended (time to rotate host)
+        elif msg.data == 'The match has finished!':
+            print(f"Match ended! Rotating host...")
+            name = self.host_queue.pop(0)
+            self.host_queue.append(name)
+            print(f"New host is {name}")
+            print(f"New queue: {self.host_queue}")
+            await self.client.privmsg(self.channel, f'!mp host {name}')
+            await self.client.privmsg(self.channel, f'Host queue: {self.host_queue}')
