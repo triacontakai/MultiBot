@@ -16,8 +16,15 @@ class LobbyManager:
         self.username = username
         self.lobbyname = lobbyname
 
+    async def __aenter__(self):
+        await self.start()
+        return self
+
+    async def __aexit__(self, *a):
+        await self.shutdown()
+
     # create a lobby and start tracking its state
-    async def lobby(self):
+    async def start(self):
         client = self.client
         await client.privmsg(bancho, f'!mp make {self.lobbyname}')
 
@@ -35,9 +42,24 @@ class LobbyManager:
     async def shutdown(self):
         await self.client.privmsg(self.channel, '!mp close')
 
-    async def __aenter__(self):
-        await self.lobby()
-        return self
+    # process next irc message, changing internal state
+    async def process_msg(self):
+        msg = await self.client.recv_msg()
 
-    async def __aexit__(self, *a):
-        await self.shutdown()
+        # any other commands are likely irc filler
+        if msg.command != 'PRIVMSG':
+            return
+
+        # only handle messages in DMs or lobby
+        msg_channel = msg.params[0]
+        if msg_channel != self.channel and msg_channel != self.username:
+            return
+
+        # bancho messages will result in lobby state changes, handle this in internal function
+        #if msg.sender == f'{bancho}{suffix}' and msg_channel == self.channel:
+        #    self._handle_bancho(msg)
+
+        # check player messages for attempt to relay !mp commands
+        # TODO: only relay from current host and specified operators
+        if msg.data.startswith('!mp'):
+            await self.client.privmsg(self.channel, msg.data)

@@ -80,7 +80,10 @@ class Message:
 
         response = response[1:]
         blocks = response.split(b':',1)
-        self.data = blocks[1].decode('ascii')
+        if len(blocks) > 1:
+            self.data = blocks[1].decode('ascii')
+        else:
+            self.data = ''
 
         blocks = blocks[0].split()
         self.sender = blocks[0].decode('ascii')

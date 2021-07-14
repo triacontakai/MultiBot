@@ -16,7 +16,8 @@ async def main():
         await client.login(username, password)
         async with LobbyManager(client, username, 'cool lobby (bot testing, dont join)') as manager:
             print(f"Joined channel {manager.channel}")
-            await asyncio.sleep(10)
+            while True:
+                await manager.process_msg()
 
 try:
     asyncio.run(main())
