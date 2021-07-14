@@ -50,14 +50,12 @@ class IrcHandler:
             if response[0] == ord(':'):
                 return Message(response)
 
-            # if we get a direct IRC command, handle it here
+            # if we get an internal IRC command, handle it here
             command, _, argument = response.partition(b' ')
             if command == b'PING':
                 reply = b'PONG ' + argument + b'\r\n'
                 self.writer.write(reply)
                 await self.writer.drain()
-                print(response)
-                print(reply)
             else:
                 raise UnsupportedCommandError("Invalid command: {command.decode('ascii')}")
 
@@ -81,7 +79,7 @@ class Message:
         assert response[0] == ord(':')
 
         response = response[1:]
-        blocks = response.split(b':')
+        blocks = response.split(b':',1)
         self.data = blocks[1].decode('ascii')
 
         blocks = blocks[0].split()
