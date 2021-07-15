@@ -4,7 +4,7 @@ from dataclasses import dataclass, InitVar, field
 
 # abstracts irc messages into a more easily dealt with form
 # also filters out certain types of messages we don't care about (e.g. QUIT)
-class IrcHandler:
+class IRCSocket:
     host: str
     port: int
     reader: asyncio.StreamReader
