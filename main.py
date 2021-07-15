@@ -18,6 +18,7 @@ async def on_init(client):
 
 @client.event
 async def on_message(client, message):
-    print(message)
+    if message.command != 'QUIT':
+        print(message)
 
 client.run(username, password)

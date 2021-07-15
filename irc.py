@@ -9,17 +9,19 @@ on_init: called after login
 on_shutdown: called right before closing asyncio sockets (in clean shutdown)
 on_message: called when IRC command is received from server
 """
-class IRCManager:
+class Client:
     host: str
     port: int
     username: str # we store this so we can identify DMs
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
+    event_exception: Exception
 
     def __init__(self, host: str, port: int):
         self.host = host
         self.port = port
         self.username = None
+        self.event_exception = None
 
     async def connect(self):
         self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
@@ -34,20 +36,32 @@ class IRCManager:
         self.writer.write(commands)
         await self.writer.drain()
 
-    # attempt to cleanly close connection with QUIT command
+    # attempt to cleanly close IRC connection
     async def close(self):
         self.writer.write(b'QUIT\r\n')
         self.writer.close()
         await self.writer.wait_closed()
 
-    # decorator that registers an event without inheritance
+    # decorator: registers an event without inheritance
     def event(self, handler: Callable[[Any], Awaitable]) -> Callable:
         bound = handler.__get__(self)
-        setattr(self, handler.__name__, bound)
+        error_handled = self._error_handler(bound)
+        setattr(self, handler.__name__, error_handled)
+        return handler
+
+    # decorator: passes errors to current instance for processing
+    # used to avoid "exception was never retreived" warning
+    def _error_handler(self, func):
+        async def handler(*args, **kwargs):
+            try:
+                await func(*args, **kwargs)
+            except Exception as e:
+                self.event_exception = e
+
         return handler
 
     # events (to be implemented by client)
-    # these are all executed using create_task in order to prevent blocking _recv_loop
+    # most of these are executed using create_task in order to prevent blocking _recv_loop
     async def on_init(self) -> None:
         pass
     async def on_shutdown(self) -> None:
@@ -55,20 +69,31 @@ class IRCManager:
     async def on_message(self, message: 'Message') -> None:
         pass
 
-    # connect, login, and receive messages indefinitely
-    # dispatch registered events as needed
-    # this also handles cleanup 
-    async def _recv_loop(self, username: str, password: str) -> None:
-        await self.connect()
-        await self.login(username, password)
-        asyncio.create_task(self.on_init())
+    # execute full lifecycle of client
+    async def start(self, username: str, password: str) -> None:
         try:
-            while True:
-                message = await self._recv()
-                asyncio.create_task(self.on_message(message))
+            await self.connect()
+            await self.login(username, password)
+            asyncio.create_task(self.on_init())
+            await self._recv_loop()
         finally:
+            # this is the only event we await, since we don't want to close and then shut down
             await self.on_shutdown()
             await self.close()
+
+    # synchronous wrapper for start
+    def run(self, username: str, password: str) -> None:
+        asyncio.run(self.start(username, password))
+
+    # receive messages indefinitely
+    # dispatch registered events as needed
+    async def _recv_loop(self) -> None:
+        while self.event_exception == None:
+            message = await self._recv()
+            asyncio.create_task(self.on_message(message))
+
+        # if we got here an event handler errored, so we're raising this where it will shut down the program
+        raise self.event_exception
 
     # receive a Message from a client and handle IRC commands if we get them
     async def _recv(self) -> 'Message':
@@ -79,12 +104,12 @@ class IRCManager:
             if response[0] == ord(':'):
                 is_command = False
             else:
-                self._handle(response)
+                await self._handle(response)
                 is_command = True
 
         return Message(response)
 
-    # handle 
+    # handle actual IRC commands (not responses)
     async def _handle(self, packet: str) -> None:
         command, argument_str = response.split(b' ', 1)
         if command == b'PING':
@@ -94,8 +119,7 @@ class IRCManager:
         else:
             raise UnsupportedCommandError("Invalid command: {command.decode('ascii')}")
 
-    def run(self, username: str, password: str) -> None:
-        asyncio.run(self._recv_loop(username, password))
+        
 
 @dataclass
 class Message:
